@@ -4,10 +4,11 @@ import com.google.gson.Gson;
 import org.apache.commons.pool2.impl.GenericObjectPoolConfig;
 import org.json.JSONObject;
 import redis.clients.jedis.*;
+import redis.clients.jedis.json.Path2;
 import redis.clients.jedis.providers.PooledConnectionProvider;
 
 import java.io.BufferedReader;
-import java.io.Reader;
+
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.nio.file.Files;
@@ -71,6 +72,7 @@ public class Main {
         try{
             connectionHelper = new ConnectionHelper(buildURI(host,port,username,password));
             loadJSONDataFromFile(filepath,connectionHelper);
+            manipulateJsonData(connectionHelper);
         }catch(Throwable t){t.printStackTrace();}
 
     }
@@ -120,6 +122,25 @@ public class Main {
         pipeline.sync();//in case there are extra objects in the pipe
         return pipeCounter;
     }
+
+    static void manipulateJsonData(ConnectionHelper connectionHelper){
+        Gson gson = new Gson();
+        Pipeline pipeline = connectionHelper.getPipeline();
+        //***  dcp:{batch1}1070, dcp:{batch1}1407 are objects from the test dataset file
+        pipeline.jsonDel("dcp:{batch1}1070", Path2.of("$.columndetails[2].columnid"));
+        pipeline.jsonSet("dcp:{batch1}1070",Path2.of("$.buname"),gson.toJson("FIN"));
+        pipeline.jsonSet("dcp:{batch1}1407",Path2.of("$.buname"),gson.toJson("FINAL"));
+        pipeline.sync();
+        System.out.println("Pipeline complete");
+        //*** now as a TX:
+        Transaction tx = connectionHelper.getTransaction();
+        tx.jsonDel("dcp:{batch1}1070", Path2.of("$.columndetails[3].columnid"));
+        tx.jsonSet("dcp:{batch1}1070", Path2.of("$.columndetails[2].columnid"),gson.toJson(99888776));
+        tx.jsonSet("dcp:{batch1}1070",Path2.of("$.buname"),gson.toJson("AGGORAL"));
+        tx.jsonSet("dcp:{batch1}1407",Path2.of("$.buname"),gson.toJson("BORRAYS"));
+        tx.exec();
+        System.out.println("TX complete");
+    }
 }
 
 
@@ -130,6 +151,10 @@ class ConnectionHelper{
 
     public Pipeline getPipeline(){
         return new Pipeline(connectionProvider.getConnection());
+    }
+
+    public Transaction getTransaction(){
+        return new Transaction(connectionProvider.getConnection());
     }
 
     public JedisPooled getPooledJedis(){
